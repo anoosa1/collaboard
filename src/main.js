@@ -1,7 +1,6 @@
 import { WebSocketClient } from './websocket.js';
 import { Canvas } from './canvas.js';
 import { TOOLS } from './tools.js';
-import { THEMES } from './themes.js';
 
 const generateUUID = () => {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
@@ -101,6 +100,7 @@ const init = () => {
             dot.className = 'status-dot ' + (status === 'connected' ? 'connected' : status === 'connecting' ? 'connecting' : 'disconnected');
             const labels = { connected: 'Connected', connecting: 'Reconnecting...', disconnected: 'Disconnected' };
             statusEl.title = labels[status] || status;
+            document.getElementById('connection-label').textContent = labels[status] || status;
         }
     });
 
@@ -112,8 +112,13 @@ const init = () => {
             const tool = btn.id;
 
             // Update active state
-            document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tool-btn').forEach(b => {
+                b.classList.remove('active');
+                b.setAttribute('aria-pressed', 'false');
+            });
             btn.classList.add('active');
+            btn.setAttribute('aria-pressed', 'true');
+            document.getElementById('active-tool-name').textContent = tool[0].toUpperCase() + tool.slice(1);
 
             // Set tool
             if (TOOLS[tool.toUpperCase()]) {
@@ -152,7 +157,9 @@ const init = () => {
     imageFileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
-            canvas.importImage(file);
+            canvas.importImage(file).catch(() => {
+                alert('Could not import this image. Try a smaller PNG or JPEG file.');
+            });
             imageFileInput.value = ''; // Reset so same file can be imported again
         }
     });
@@ -180,6 +187,7 @@ const init = () => {
         colorPicker.value = color;
         swatches.forEach(s => {
             s.classList.toggle('active', s.dataset.color === color);
+            s.setAttribute('aria-pressed', String(s.dataset.color === color));
         });
     };
 
@@ -251,79 +259,31 @@ const init = () => {
         }
     });
 
-    // 8b. Theme selector + dark mode toggle
-    const themeSelect = document.getElementById('theme-select');
-    const darkModeCheckbox = document.getElementById('dark-mode-checkbox');
-    const darkModeLabel = document.getElementById('dark-mode-label');
-    let activeThemeKey = 'default';
-
-    // Apply CSS vars + canvas colors for a given variant object { ui, canvas }
-    const applyVariant = (variant) => {
-        const root = document.documentElement;
-        for (const [prop, value] of Object.entries(variant.ui)) {
-            root.style.setProperty(prop, value);
+    // Share the current room; clipboard permissions can be denied by the browser.
+    let toastTimeout;
+    document.getElementById('copy-room-link').addEventListener('click', async () => {
+        const toast = document.getElementById('toast');
+        try {
+            await navigator.clipboard.writeText(window.location.href);
+            toast.textContent = 'Room link copied';
+        } catch {
+            toast.textContent = 'Could not copy. Copy the room link from your address bar.';
         }
-        canvas.setTheme(variant.canvas, null, false);
-    };
-
-    const applyTheme = (themeKey, isDark, saveToStorage = true) => {
-        const theme = THEMES[themeKey];
-        if (!theme) return;
-        activeThemeKey = themeKey;
-
-        if (theme.hasLightDark) {
-            // Paired theme — use dark/light sub-object based on toggle
-            const variant = isDark ? theme.dark : theme.light;
-            applyVariant(variant);
-            darkModeLabel.classList.remove('disabled');
-            darkModeCheckbox.disabled = false;
-        } else {
-            // Single-mode theme — apply directly, disable toggle
-            const root = document.documentElement;
-            for (const [prop, value] of Object.entries(theme.ui)) {
-                root.style.setProperty(prop, value);
-            }
-            canvas.setTheme(theme.canvas, null, false);
-            darkModeLabel.classList.add('disabled');
-            darkModeCheckbox.disabled = true;
-            darkModeCheckbox.checked = false;
-        }
-
-        themeSelect.value = themeKey;
-
-        if (saveToStorage) {
-            localStorage.setItem('scribe-theme', themeKey);
-            localStorage.setItem('scribe-dark-mode', isDark);
-        }
-    };
-
-    // Load saved state
-    const savedTheme = localStorage.getItem('scribe-theme') || 'default';
-    const savedDarkMode = localStorage.getItem('scribe-dark-mode') !== 'false'; // default to dark
-    darkModeCheckbox.checked = savedDarkMode;
-    applyTheme(savedTheme, savedDarkMode, false);
-
-    themeSelect.addEventListener('change', (e) => {
-        applyTheme(e.target.value, darkModeCheckbox.checked);
-    });
-
-    darkModeCheckbox.addEventListener('change', () => {
-        const isDark = darkModeCheckbox.checked;
-        applyTheme(activeThemeKey, isDark);
-    });
-
-    // 9. Copy Room Link
-    document.getElementById('copy-room-link').addEventListener('click', () => {
-        navigator.clipboard.writeText(window.location.href).then(() => {
-            const toast = document.getElementById('toast');
-            toast.classList.remove('hidden');
-            setTimeout(() => toast.classList.add('hidden'), 2000);
-        });
+        toast.classList.remove('hidden');
+        clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => toast.classList.add('hidden'), 3500);
     });
 
     // 10. Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT') return;
+        if (e.target.closest('input, textarea, select, [contenteditable]')) return;
+
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
+            e.preventDefault();
+            socket.emitUndo();
+            return;
+        }
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
 
         const shortcuts = {
             'p': 'pencil',
@@ -339,84 +299,34 @@ const init = () => {
             const btn = document.getElementById(shortcuts[e.key.toLowerCase()]);
             if (btn) btn.click();
         }
-
-        // Ctrl+Z for undo
-        if (e.ctrlKey && e.key === 'z') {
-            e.preventDefault();
-            socket.emitUndo();
-        }
     });
 
-    // ======== 11. Mobile Toolbar Logic ========
-    const isMobileQuery = window.matchMedia('(max-width: 768px)');
+    // The same tool dock serves both layouts; only the settings panel collapses.
     const toolbar = document.getElementById('toolbar');
     const mobileBackdrop = document.getElementById('mobile-backdrop');
     const panelToggle = document.getElementById('mobile-panel-toggle');
-    const mobileToolBtns = document.querySelectorAll('.mobile-tool-btn[data-tool]');
-
-    let panelOpen = false;
-
-    const openPanel = () => {
-        panelOpen = true;
-        toolbar.classList.add('open');
-        mobileBackdrop.classList.add('visible');
-        mobileBackdrop.classList.remove('hidden');
-        panelToggle.classList.add('panel-open');
+    const mobileQuery = window.matchMedia('(max-width: 768px)');
+    const setPanelOpen = (open) => {
+        toolbar.classList.toggle('open', open);
+        mobileBackdrop.classList.toggle('visible', open);
+        mobileBackdrop.classList.toggle('hidden', !open);
+        panelToggle.setAttribute('aria-expanded', String(open));
     };
-
-    const closePanel = () => {
-        panelOpen = false;
-        toolbar.classList.remove('open');
-        mobileBackdrop.classList.remove('visible');
-        mobileBackdrop.classList.add('hidden');
-        panelToggle.classList.remove('panel-open');
+    panelToggle.addEventListener('click', () => {
+        const open = !toolbar.classList.contains('open');
+        setPanelOpen(open);
+        if (open) document.getElementById('close-settings').focus();
+    });
+    const closeSettings = () => {
+        setPanelOpen(false);
+        panelToggle.focus();
     };
-
-    if (panelToggle) {
-        panelToggle.addEventListener('click', () => {
-            panelOpen ? closePanel() : openPanel();
-        });
-    }
-
-    if (mobileBackdrop) {
-        mobileBackdrop.addEventListener('click', closePanel);
-    }
-
-    // Mobile tool buttons sync with desktop sidebar
-    mobileToolBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tool = btn.dataset.tool;
-
-            // Update mobile active state
-            mobileToolBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-
-            // Trigger matching desktop button
-            const desktopBtn = document.getElementById(tool);
-            if (desktopBtn) desktopBtn.click();
-
-            // Close panel if open
-            closePanel();
-        });
+    mobileBackdrop.addEventListener('click', closeSettings);
+    document.getElementById('close-settings').addEventListener('click', closeSettings);
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && toolbar.classList.contains('open')) closeSettings();
     });
-
-    // Sync desktop tool button clicks back to mobile buttons
-    document.querySelectorAll('.tool-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const toolId = btn.id;
-            mobileToolBtns.forEach(mb => {
-                mb.classList.toggle('active', mb.dataset.tool === toolId);
-            });
-        });
-    });
-
-    // Mobile undo button
-    const mobileUndo = document.getElementById('mobile-undo');
-    if (mobileUndo) {
-        mobileUndo.addEventListener('click', () => {
-            socket.emitUndo();
-        });
-    }
+    mobileQuery.addEventListener('change', () => setPanelOpen(false));
 };
 
 init();

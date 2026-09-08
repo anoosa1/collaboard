@@ -67,7 +67,7 @@ export class WebSocketClient {
         switch (data.type) {
             case 'load-state':
                 // Initial state load — use sequential replay for correct image z-order
-                if (data.drawings && data.drawings.length > 0) {
+                if (Array.isArray(data.drawings)) {
                     this.handlers.onReloadState(data.drawings);
                 }
                 if (data.userCount) {

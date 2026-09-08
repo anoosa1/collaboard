@@ -32,15 +32,8 @@ export class Canvas {
         // Drawing history for redraw on resize
         this.drawingActions = [];
 
-        // Dark mode
-        this.darkMode = false;
-
-        // Canvas theme colors (defaults)
         this.canvasBg = '#ffffff';
         this.canvasDot = '#d0d0d0';
-        this.canvasDarkBg = '#1e1e1e';
-        this.canvasDarkDot = '#3a3a3a';
-        this.themeHasLightDark = true;
 
         // Per-user remote drawing paths (keyed by userId)
         this.remoteUserPaths = new Map();
@@ -57,8 +50,8 @@ export class Canvas {
     }
 
     drawBackground() {
-        const bgColor = this.darkMode ? this.canvasDarkBg : this.canvasBg;
-        const dotColor = this.darkMode ? this.canvasDarkDot : this.canvasDot;
+        const bgColor = this.canvasBg;
+        const dotColor = this.canvasDot;
 
         this.ctx.fillStyle = bgColor;
         this.ctx.fillRect(0, 0, this.virtualWidth, this.virtualHeight);
@@ -78,7 +71,7 @@ export class Canvas {
     }
 
     get bgColor() {
-        return this.darkMode ? this.canvasDarkBg : this.canvasBg;
+        return this.canvasBg;
     }
 
     centerCanvas() {
@@ -113,7 +106,7 @@ export class Canvas {
 
         // Space key for panning (ignore when typing in inputs)
         document.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.target.closest('input, textarea, select, button, [contenteditable]')) return;
             if (e.code === 'Space' && !this.spacePressed) {
                 e.preventDefault();
                 this.spacePressed = true;
@@ -124,7 +117,7 @@ export class Canvas {
         document.addEventListener('keyup', (e) => {
             if (e.code === 'Space') {
                 this.spacePressed = false;
-                this.canvas.classList.remove('panning');
+                if (this.currentTool !== TOOLS.PAN) this.canvas.classList.remove('panning');
             }
         });
 
@@ -143,6 +136,7 @@ export class Canvas {
     }
 
     handleMouseDown(e) {
+        if (e.button !== undefined && e.button !== 0) return;
         const pos = this.getCanvasCoords(e.clientX, e.clientY);
 
         // Panning mode
@@ -157,6 +151,8 @@ export class Canvas {
         this.isDrawing = true;
         this.startX = pos.x;
         this.startY = pos.y;
+        this.lastDrawX = pos.x;
+        this.lastDrawY = pos.y;
         this.ctx.beginPath();
         this.ctx.moveTo(this.startX, this.startY);
 
@@ -205,8 +201,13 @@ export class Canvas {
             this.ctx.lineJoin = 'round';
             this.ctx.strokeStyle = this.currentTool === TOOLS.ERASER ? this.bgColor : this.color;
 
+            // Remote strokes share this context, so each local segment needs its own path.
+            this.ctx.beginPath();
+            this.ctx.moveTo(this.lastDrawX, this.lastDrawY);
             this.ctx.lineTo(pos.x, pos.y);
             this.ctx.stroke();
+            this.lastDrawX = pos.x;
+            this.lastDrawY = pos.y;
 
             const action = { type: 'draw', x: pos.x, y: pos.y };
             this.socket.emitDraw(action);
@@ -378,12 +379,14 @@ export class Canvas {
 
     zoomIn() {
         const container = this.canvas.parentElement;
-        this.zoom(1.2, container.clientWidth / 2, container.clientHeight / 2);
+        const rect = container.getBoundingClientRect();
+        this.zoom(1.2, rect.left + rect.width / 2, rect.top + rect.height / 2);
     }
 
     zoomOut() {
         const container = this.canvas.parentElement;
-        this.zoom(0.8, container.clientWidth / 2, container.clientHeight / 2);
+        const rect = container.getBoundingClientRect();
+        this.zoom(0.8, rect.left + rect.width / 2, rect.top + rect.height / 2);
     }
 
     resetView() {
@@ -551,7 +554,6 @@ export class Canvas {
                     // Safety check: reject if still too large (> 500 KB)
                     const sizeKB = Math.round((compressedDataUrl.length * 3) / 4 / 1024);
                     if (sizeKB > 500) {
-                        alert(`Image is too large to sync (${sizeKB} KB after compression). Please use a smaller image.`);
                         reject(new Error('Image too large'));
                         return;
                     }
@@ -595,6 +597,10 @@ export class Canvas {
     clear() {
         this.drawBackground();
         this.drawingActions = [];
+        this.remoteUserPaths.clear();
+        this.isDrawing = false;
+        this.snapshot = null;
+        this.ctx.beginPath();
     }
 
     async reloadFromState(drawings) {
@@ -622,37 +628,5 @@ export class Canvas {
 
         // Recenter canvas
         this.centerCanvas();
-    }
-
-    async setDarkMode(enabled) {
-        this.darkMode = enabled;
-        // Redraw background and replay all actions
-        this.drawBackground();
-        const actions = [...this.drawingActions];
-        this.drawingActions = [];
-        for (const d of actions) {
-            await this.drawRemote(d);
-        }
-    }
-
-    async setTheme(canvasColors, canvasDark, hasLightDark) {
-        this.canvasBg = canvasColors.bg;
-        this.canvasDot = canvasColors.dot;
-        this.themeHasLightDark = hasLightDark;
-        if (canvasDark) {
-            this.canvasDarkBg = canvasDark.bg;
-            this.canvasDarkDot = canvasDark.dot;
-        } else {
-            // Single-mode theme — dark canvas uses same colors
-            this.canvasDarkBg = canvasColors.bg;
-            this.canvasDarkDot = canvasColors.dot;
-        }
-        // Redraw with new colors
-        this.drawBackground();
-        const actions = [...this.drawingActions];
-        this.drawingActions = [];
-        for (const d of actions) {
-            await this.drawRemote(d);
-        }
     }
 }

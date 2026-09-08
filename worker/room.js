@@ -106,15 +106,13 @@ export class Room {
                             if (item.userId !== sessionId) continue;
 
                             if (item.type === 'end') {
-                                // Remove entire freehand stroke: end → draws → start
-                                this.drawings.splice(i, 1); // remove 'end'
-                                // Now search backwards from i for matching start
+                                // Remove only this user's stroke; other users may be interleaved.
+                                this.drawings.splice(i, 1);
                                 for (let j = i - 1; j >= 0; j--) {
-                                    const a = this.drawings[j];
-                                    if (a.userId === sessionId && a.type === 'start') {
-                                        this.drawings.splice(j, i - j); // remove start + all draws
-                                        break;
-                                    }
+                                    const action = this.drawings[j];
+                                    if (action.userId !== sessionId) continue;
+                                    this.drawings.splice(j, 1);
+                                    if (action.type === 'start') break;
                                 }
                                 removed = true;
                                 break;
