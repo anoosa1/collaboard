@@ -11,7 +11,11 @@
 <body>
   <div id="app">
     <header class="workspace-header">
-      <div class="board-identity"><strong>scribe</strong><span class="identity-divider"></span><span>Board <code id="room-id-display">…</code></span></div>
+      <div class="board-identity"><strong>scribe</strong><span class="identity-divider"></span><span>Board <code id="room-id-display">…</code></span>
+        <button id="copy-room-id" title="Copy room ID" aria-label="Copy room ID">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4"/></svg>
+        </button>
+      </div>
       <div class="room-info">
         <span class="connection-status" id="connection-status" title="Connecting"><span class="status-dot connecting"></span><span id="connection-label" role="status">Connecting</span></span>
         <span class="users-connected" title="People in this room"><span id="user-count">1</span> <span>online</span></span>

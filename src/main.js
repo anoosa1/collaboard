@@ -259,20 +259,22 @@ const init = () => {
         }
     });
 
-    // Share the current room; clipboard permissions can be denied by the browser.
+    // Copy either the room URL or its ID, with feedback if clipboard access fails.
     let toastTimeout;
-    document.getElementById('copy-room-link').addEventListener('click', async () => {
+    const copyRoomValue = async (value, label) => {
         const toast = document.getElementById('toast');
         try {
-            await navigator.clipboard.writeText(window.location.href);
-            toast.textContent = 'Room link copied';
+            await navigator.clipboard.writeText(value);
+            toast.textContent = `${label} copied`;
         } catch {
-            toast.textContent = 'Could not copy. Copy the room link from your address bar.';
+            toast.textContent = `Could not copy ${label.toLowerCase()}. You can find it in your address bar.`;
         }
         toast.classList.remove('hidden');
         clearTimeout(toastTimeout);
         toastTimeout = setTimeout(() => toast.classList.add('hidden'), 3500);
-    });
+    };
+    document.getElementById('copy-room-link').addEventListener('click', () => copyRoomValue(window.location.href, 'Room link'));
+    document.getElementById('copy-room-id').addEventListener('click', () => copyRoomValue(roomId, 'Room ID'));
 
     // 10. Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
